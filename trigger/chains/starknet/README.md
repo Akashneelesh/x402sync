@@ -8,29 +8,54 @@ The Starknet integration tracks USDC token transfers on the Starknet mainnet usi
 
 ## Implementation
 
-### ✅ Starknet RPC (Production Ready)
+### 🚀 Starknet Apibara (Recommended - Low Latency)
+**Status:** Ready to use  
+**Location:** `trigger/chains/starknet/apibara/`
+
+Uses Apibara's streaming data platform for low-latency, efficient data access. **Recommended for production due to better performance.**
+
+**Features:**
+- ✅ **Low latency** streaming data
+- ✅ **Efficient** - No need for batch RPC calls
+- ✅ Built-in block reorganization handling
+- ✅ Real-time data availability
+- ✅ Optimized for Starknet
+
+**Configuration:**
+- Cron: Runs every hour (`0 * * * *`)
+- Time Window: 1 day
+- Limit: 5,000 events per window
+- API URL: Set via `APIBARA_DNA_URL` (defaults to mainnet.starknet.a5a.ch)
+- Optional API Key: Set via `APIBARA_API_KEY` for hosted service
+
+### ✅ Starknet RPC (Alternative)
 **Status:** Ready to use  
 **Location:** `trigger/chains/starknet/rpc/`
 
 Uses Starknet.js to query transfer events directly from Starknet RPC nodes with optimized batch processing.
 
 **Features:**
-- ✅ Efficient batch caching (93% fewer RPC calls)
+- ✅ Efficient batch caching
 - ✅ Proper pagination handling
-- ✅ Smart block range calculation
 - ✅ Rate limiting protection
-- ✅ Facilitator filtering
+- ✅ Works with any RPC provider
 
 **Configuration:**
 - Cron: Runs every hour (`0 * * * *`)
-- Time Window: 1 day (configurable)
-- Limit: 2,000 events per window (configurable)
-- RPC: Optimized for Alchemy free tier (5 concurrent requests)
+- Time Window: 1 day
+- Limit: 2,000 events per window
 - RPC URL: Set via `STARKNET_RPC_URL` environment variable
 
 **Environment Variables:**
 ```bash
+# For Apibara (recommended)
+APIBARA_DNA_URL=https://mainnet.starknet.a5a.ch  # Optional, has default
+APIBARA_API_KEY=your_key_here                    # Optional, for hosted service
+
+# For RPC (alternative)
 STARKNET_RPC_URL=https://starknet-mainnet.public.blastapi.io  # Optional, has default
+
+# Required
 DATABASE_URL=postgresql://...  # Required
 ```
 
@@ -127,11 +152,19 @@ To activate Starknet syncing:
 ```
 trigger/
 ├── chains/starknet/
-│   ├── rpc/              # ✅ Production-ready RPC implementation
+│   ├── apibara/          # 🚀 Apibara implementation (recommended)
+│   │   ├── config.ts     # Sync configuration
+│   │   ├── query.ts      # Query builder
+│   │   └── sync.ts       # Trigger.dev task export
+│   ├── rpc/              # ✅ RPC implementation (alternative)
 │   │   ├── config.ts     # Sync configuration
 │   │   ├── query.ts      # Query builder
 │   │   └── sync.ts       # Trigger.dev task export
 │   └── README.md         # This file
+│
+├── fetch/apibara/        # Core Apibara streaming logic
+│   ├── fetch.ts          # Streaming with Apibara SDK
+│   └── helpers.ts        # Event parsing
 │
 └── fetch/starknet-rpc/   # Core RPC fetching logic
     ├── fetch.ts          # Main fetching with pagination

@@ -24,6 +24,7 @@ export enum QueryProvider {
   BIGQUERY = 'bigquery',
   CDP = 'cdp',
   STARKNET_RPC = 'starknet-rpc',
+  APIBARA = 'apibara',
 }
 
 interface BaseQueryConfig {
