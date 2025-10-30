@@ -34,6 +34,7 @@
     "@trigger.dev/sdk": "4.0.4",
     "bottleneck": "^2.19.5",
     "p-limit": "^7.2.0",
+    "starknet": "^6.20.3",
     "ws": "^8.18.3"
   },
   "devDependencies": {

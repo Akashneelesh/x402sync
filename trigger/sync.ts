@@ -65,7 +65,9 @@ export function createChainSyncTask(syncConfig: SyncConfig) {
         }
       } catch (error) {
         logger.error(`[${syncConfig.chain}] Error syncing transfers:`, {
-          error: String(error),
+          error: error instanceof Error ? error.message : String(error),
+          stack: error instanceof Error ? error.stack : undefined,
+          details: error,
         });
         throw error;
       }

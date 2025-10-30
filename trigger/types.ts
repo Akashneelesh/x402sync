@@ -23,6 +23,7 @@ export enum QueryProvider {
   BITQUERY = 'bitquery',
   BIGQUERY = 'bigquery',
   CDP = 'cdp',
+  STARKNET_RPC = 'starknet-rpc',
 }
 
 interface BaseQueryConfig {
@@ -75,6 +76,7 @@ export enum Chain {
   BASE = 'base',
   POLYGON = 'polygon',
   SOLANA = 'solana',
+  STARKNET = 'starknet',
 }
 
 export interface FacilitatorConfig {
@@ -150,4 +152,24 @@ export interface BitQueryTransferRowStream {
     Hash: string;
     From: string;
   };
+}
+
+export interface StarknetEvent {
+  from_address: string;
+  keys: string[];
+  data: string[];
+  transaction_hash: string;
+  block_number: number;
+  block_hash: string;
+}
+
+export interface StarknetTransferRow {
+  transaction_hash: string;
+  block_number: number;
+  block_timestamp: number;
+  from_address: string;
+  to_address: string;
+  amount: string;
+  contract_address: string;
+  event_index: number;
 }

@@ -2,7 +2,7 @@ import { defineConfig } from '@trigger.dev/sdk/v3';
 import { prismaExtension } from '@trigger.dev/build/extensions/prisma';
 
 export default defineConfig({
-  project: 'proj_gwxcbnozwwzpeqgrhynz',
+  project: 'proj_pnziaibyeyqebhmzntoj',
   runtime: 'node',
   logLevel: 'log',
   // The max compute seconds a task is allowed to run. If the task run exceeds this duration, it will be stopped.
@@ -25,7 +25,10 @@ export default defineConfig({
       prismaExtension({
         schema: 'prisma/schema.prisma',
         version: '6.17.1',
+        clientGenerator: 'client',
       }),
     ],
   },
+  // Ensure environment variables are available in the runtime
+  instrumentedPackageNames: ['@prisma/client', '@neondatabase/serverless'],
 });

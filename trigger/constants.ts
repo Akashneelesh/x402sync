@@ -30,3 +30,11 @@ export const USDC_POLYGON_TOKEN = {
   decimals: USDC_DECIMALS,
   symbol: 'USDC',
 };
+
+export const USDC_STARKNET =
+  '0x053c91253bc9682c04929ca02ed00b3e423f6710d2ee7e0d5ebb06f3ecf368a8'; // USDC on Starknet
+export const USDC_STARKNET_TOKEN = {
+  address: USDC_STARKNET,
+  decimals: USDC_DECIMALS,
+  symbol: 'USDC',
+};

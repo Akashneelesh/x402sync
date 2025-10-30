@@ -10,6 +10,7 @@ import { fetchWithOffsetPagination, fetchBitquery } from './bitquery/fetch';
 import { fetchBigQuery } from './bigquery/fetch';
 import { logger } from '@trigger.dev/sdk';
 import { fetchCDP } from './cdp/fetch';
+import { fetchStarknetRpc } from './starknet-rpc/fetch';
 
 export async function fetchTransfers(
   config: SyncConfig,
@@ -90,6 +91,15 @@ async function fetchWithWindow(
     }
     if (provider === QueryProvider.CDP) {
       results = await fetchCDP(
+        config,
+        facilitator,
+        facilitatorConfig,
+        currentStart,
+        currentEnd
+      );
+    }
+    if (provider === QueryProvider.STARKNET_RPC) {
+      results = await fetchStarknetRpc(
         config,
         facilitator,
         facilitatorConfig,
