@@ -23,8 +23,7 @@ export enum QueryProvider {
   BITQUERY = 'bitquery',
   BIGQUERY = 'bigquery',
   CDP = 'cdp',
-  STARKNET_RPC = 'starknet-rpc',
-  APIBARA = 'apibara',
+  APIBARA = 'apibara', // Starknet integration (apibara branch)
 }
 
 interface BaseQueryConfig {
