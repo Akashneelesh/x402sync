@@ -27,6 +27,10 @@ async function viewStarknetData() {
     const uniqueFacilitators = new Set(transfers.map(t => t.facilitator_id)).size;
     const uniqueSenders = new Set(transfers.map(t => t.sender)).size;
     const uniqueRecipients = new Set(transfers.map(t => t.recipient)).size;
+    const byProvider = transfers.reduce((acc, t) => {
+      acc[t.provider] = (acc[t.provider] || 0) + 1;
+      return acc;
+    }, {} as Record<string, number>);
 
     console.log('📈 Summary:');
     console.log(`  Total transfers: ${transfers.length}`);
@@ -34,6 +38,7 @@ async function viewStarknetData() {
     console.log(`  Unique facilitators: ${uniqueFacilitators}`);
     console.log(`  Unique senders: ${uniqueSenders}`);
     console.log(`  Unique recipients: ${uniqueRecipients}`);
+    console.log(`  By Provider:`, byProvider);
     console.log();
 
     // Show first 10 transfers
@@ -48,6 +53,7 @@ async function viewStarknetData() {
       console.log(`   To: ${t.recipient.slice(0, 10)}...${t.recipient.slice(-8)}`);
       console.log(`   Amount: ${(Number(t.amount) / 1_000_000).toFixed(6)} USDC`);
       console.log(`   Facilitator: ${t.facilitator_id}`);
+      console.log(`   Provider: ${t.provider}`);
     }
 
     console.log('\n' + '─'.repeat(100));

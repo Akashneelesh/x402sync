@@ -28,5 +28,6 @@ export default defineConfig({
         clientGenerator: 'client',
       }),
     ],
+    external: ['@apibara/protocol', '@apibara/starknet'],
   },
 });

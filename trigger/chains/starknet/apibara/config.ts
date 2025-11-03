@@ -16,7 +16,7 @@ export const starknetApibaraConfig: SyncConfig = {
   apiUrl: process.env.APIBARA_DNA_URL || 'https://mainnet.starknet.a5a.ch', // Apibara DNA stream URL
   paginationStrategy: PaginationStrategy.TIME_WINDOW,
   timeWindowInMs: ONE_DAY_IN_MS * 2, // 2-day windows
-  limit: 5_000, // 5,000 events per window
+  limit: 10_000, // 10,000 events per window (DNA can handle larger batches than RPC)
   facilitators: FACILITATORS_BY_CHAIN(Chain.STARKNET),
   buildQuery,
   transformResponse,

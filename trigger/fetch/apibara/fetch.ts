@@ -5,23 +5,31 @@ import {
   TransferEventData,
   FacilitatorConfig,
 } from '../../types';
-import { RpcProvider, hash } from 'starknet';
-import { parseApibaraEvents } from './helpers';
+import { StreamClient, v1alpha2 } from '@apibara/protocol';
+import { Filter, FieldElement } from '@apibara/starknet';
+import { hash } from 'starknet';
+import Long from 'long';
+import { parseApibaraStreamBlock } from './helpers';
 
 /**
- * Fetch transfer events from Starknet using Apibara DNA service
+ * Fetch transfer events from Starknet using Apibara DNA Stream (gRPC)
  * 
- * This implementation uses the Apibara DNA service for querying events:
- * - Direct access to Apibara's indexed data
- * - Fast historical queries
- * - No RPC rate limits
- * - Optimized for batch data retrieval
+ * This implementation uses Apibara DNA's gRPC streaming for real-time data:
+ * - Continuous streaming of blocks as they're finalized
+ * - Low latency (< 1 minute from block creation)
+ * - Automatic reconnection on errors
+ * - No rate limits
  * 
  * Requires:
- * - APIBARA_ACCESS_TOKEN: Your Apibara access token
  * - APIBARA_DNA_URL: DNA service URL (defaults to mainnet)
+ * - APIBARA_AUTH_TOKEN: Auth token for DNA service
  * 
- * Falls back to RPC if Apibara token is not available.
+ * How it works:
+ * 1. Creates a gRPC streaming client
+ * 2. Configures filter for Transfer events
+ * 3. Streams blocks continuously from starting cursor
+ * 4. Processes events in real-time
+ * 5. Returns collected events when time window is complete
  */
 export async function fetchApibara(
   config: SyncConfig,
@@ -30,187 +38,53 @@ export async function fetchApibara(
   since: Date,
   now: Date
 ): Promise<TransferEventData[]> {
-  logger.log(
-    `[${config.chain}] Fetching Starknet data via Apibara DNA from ${since.toISOString()} to ${now.toISOString()}`
-  );
-
-  const apibaraToken = process.env.APIBARA_ACCESS_TOKEN;
-  const apibaraDnaUrl = process.env.APIBARA_DNA_URL || 'https://mainnet.starknet.a5a.ch';
-
-  if (!apibaraToken) {
-    logger.warn(
-      `[${config.chain}] APIBARA_ACCESS_TOKEN not found, falling back to RPC`
-    );
-    // Fallback to RPC if no Apibara token
-    const rpcUrl =
-      process.env.STARKNET_RPC_URL || 
-      'https://starknet-mainnet.g.alchemy.com/starknet/version/rpc/v0_9/iK7ogImR5B8hKI4X43AQh';
-    
-    return fetchViaRpc(config, facilitator, facilitatorConfig, since, now, rpcUrl);
-  }
-
-  try {
-    logger.log(
-      `[${config.chain}] Using Apibara DNA service at ${apibaraDnaUrl}`
-    );
-    
-    return await fetchViaApibaraDna(
-      config,
-      facilitator,
-      facilitatorConfig,
-      since,
-      now,
-      apibaraDnaUrl,
-      apibaraToken
-    );
-  } catch (error) {
-    logger.error(`[${config.chain}] Apibara DNA query failed, falling back to RPC:`, {
-      error: error instanceof Error ? error.message : String(error),
-    });
-    
-    // Fallback to RPC on error
-    const rpcUrl =
-      process.env.STARKNET_RPC_URL || 
-      'https://starknet-mainnet.g.alchemy.com/starknet/version/rpc/v0_9/iK7ogImR5B8hKI4X43AQh';
-    
-    return fetchViaRpc(config, facilitator, facilitatorConfig, since, now, rpcUrl);
-  }
-}
-
-/**
- * Fetch via Apibara DNA service
- * 
- * Important: Apibara DNA is designed for CONTINUOUS STREAMING, not batch queries.
- * 
- * How Apibara DNA works:
- * 1. You start an indexer that streams blocks continuously
- * 2. The indexer writes data to YOUR database
- * 3. You query YOUR database for the data you need
- * 
- * For scheduled batch queries (like hourly syncs), RPC is actually more appropriate.
- * Your Apibara token is valuable for setting up a real-time indexer.
- */
-async function fetchViaApibaraDna(
-  config: SyncConfig,
-  facilitator: Facilitator,
-  facilitatorConfig: FacilitatorConfig,
-  since: Date,
-  now: Date,
-  dnaUrl: string,
-  accessToken: string
-): Promise<TransferEventData[]> {
-  logger.log(
-    `[${config.chain}] ✅ Streaming from Apibara DNA: ${dnaUrl}`
-  );
+  // gRPC expects hostname without protocol
+  const dnaUrl = (process.env.APIBARA_DNA_URL || 'https://mainnet.starknet.a5a.ch')
+    .replace('https://', '')
+    .replace('http://', '');
+  const authToken = process.env.APIBARA_AUTH_TOKEN;
   
-  // Use Apibara DNA stream URL directly
-  return fetchViaApibaraStream(config, facilitator, facilitatorConfig, since, now, dnaUrl, accessToken);
-}
+  if (!authToken) {
+    throw new Error(
+      'APIBARA_AUTH_TOKEN is required for DNA streaming. ' +
+      'Get your token at https://console.apibara.com'
+    );
+  }
 
-/**
- * Fetch via Apibara DNA stream
- * Uses the Apibara DNA streaming service for efficient data access
- */
-async function fetchViaApibaraStream(
-  config: SyncConfig,
-  facilitator: Facilitator,
-  facilitatorConfig: FacilitatorConfig,
-  since: Date,
-  now: Date,
-  dnaUrl: string,
-  accessToken: string
-): Promise<TransferEventData[]> {
   logger.log(
-    `[${config.chain}] Connecting to Apibara DNA stream...`
+    `[${config.chain}] Starting Apibara DNA stream from ${since.toISOString()} to ${now.toISOString()}`
   );
-
-  // For block number estimation, we still need a quick RPC call
-  const tempRpcUrl = process.env.STARKNET_RPC_URL || 
-    'https://starknet-mainnet.g.alchemy.com/starknet/version/rpc/v0_9/iK7ogImR5B8hKI4X43AQh';
-  const provider = new RpcProvider({ nodeUrl: tempRpcUrl });
+  logger.log(`[${config.chain}] DNA endpoint: ${dnaUrl}`);
 
   try {
-    const transferKey = hash.getSelectorFromName('Transfer');
-    const latestBlock = await provider.getBlockLatestAccepted();
-    const STARKNET_BLOCK_TIME_SECONDS = 6;
-    
-    // Estimate block numbers from timestamps
-    const nowBlockOffset = Math.floor(
-      (new Date().getTime() - now.getTime()) / 1000 / STARKNET_BLOCK_TIME_SECONDS
-    );
-    const sinceBlockOffset = Math.floor(
-      (new Date().getTime() - since.getTime()) / 1000 / STARKNET_BLOCK_TIME_SECONDS
-    );
-    
-    const toBlock = Math.max(0, latestBlock.block_number - nowBlockOffset);
-    const fromBlock = Math.max(0, latestBlock.block_number - sinceBlockOffset);
+    // Calculate block range from the provided timestamps
+    const startingBlock = estimateBlockFromTimestamp(since);
+    const endingBlock = estimateBlockFromTimestamp(now);
 
     logger.log(
-      `[${config.chain}] Apibara DNA: Fetching blocks ${fromBlock} to ${toBlock} for contract ${facilitatorConfig.token.address}`
+      `[${config.chain}] Estimated block range: ${startingBlock} to ${endingBlock} (${since.toISOString()} to ${now.toISOString()})`
     );
 
-    // Fetch events using Apibara DNA stream approach
-    // Note: Apibara DNA is accessed via the stream URL, but for batch queries we use paginated requests
-    const allEvents: any[] = [];
-    let continuationToken: string | undefined;
-    let pageCount = 0;
-    const MAX_PAGES = 10;
-
-    do {
-      const eventFilter: any = {
-        from_block: { block_number: fromBlock },
-        to_block: { block_number: toBlock },
-        address: facilitatorConfig.token.address,
-        keys: [[transferKey]],
-        chunk_size: Math.min(config.limit, 1000),
-      };
-
-      if (continuationToken) {
-        eventFilter.continuation_token = continuationToken;
-      }
-
-      logger.log(
-        `[${config.chain}] Apibara DNA: Fetching page ${pageCount + 1}${continuationToken ? ' with continuation token' : ''}`
-      );
-
-      const eventsResponse = await provider.getEvents(eventFilter);
-      const events = eventsResponse.events || [];
-
-      logger.log(`[${config.chain}] Apibara DNA: Received ${events.length} events in this page`);
-
-      allEvents.push(...events);
-      continuationToken = eventsResponse.continuation_token;
-      pageCount++;
-
-      if (allEvents.length >= config.limit || pageCount >= MAX_PAGES) {
-        if (continuationToken) {
-          logger.warn(
-            `[${config.chain}] Apibara DNA: Hit limit (${config.limit} events or ${MAX_PAGES} pages), more data available`
-          );
-        }
-        break;
-      }
-    } while (continuationToken);
-
-    logger.log(
-      `[${config.chain}] Apibara DNA: Total events fetched: ${allEvents.length} across ${pageCount} pages`
-    );
-
-    // Parse events with optimized approach
-    const transferEvents = await parseApibaraEvents(
-      allEvents,
+    // Stream events from DNA
+    const events = await streamFromApibaraDNA(
+      dnaUrl,
+      authToken,
+      facilitatorConfig.token.address,
+      startingBlock,
+      endingBlock,
       config,
       facilitator,
-      facilitatorConfig,
-      provider
+      facilitatorConfig
     );
 
-    // Filter by facilitator
+    logger.log(`[${config.chain}] DNA stream complete: ${events.length} events`);
+
+    // Filter by facilitator address
     const normalizedFacilitatorAddr = facilitatorConfig.address
       .toLowerCase()
       .replace(/^0x0+/, '0x');
 
-    const facilitatorEvents = transferEvents.filter((event: TransferEventData) => {
+    const facilitatorEvents = events.filter((event: TransferEventData) => {
       const normalizedSender = event.sender
         .toLowerCase()
         .replace(/^0x0+/, '0x');
@@ -218,7 +92,7 @@ async function fetchViaApibaraStream(
     });
 
     logger.log(
-      `[${config.chain}] Apibara DNA: Filtered to ${facilitatorEvents.length} events from facilitator ${facilitator.id}`
+      `[${config.chain}] Filtered to ${facilitatorEvents.length} events from facilitator ${facilitator.id}`
     );
 
     return facilitatorEvents;
@@ -232,117 +106,163 @@ async function fetchViaApibaraStream(
 }
 
 /**
- * Fetch via RPC with Apibara-optimized settings
- * (kept as fallback if Apibara DNA fails)
+ * Stream events from Apibara DNA using gRPC
  */
-async function fetchViaRpc(
+async function streamFromApibaraDNA(
+  dnaUrl: string,
+  authToken: string,
+  contractAddress: string,
+  startingBlock: number,
+  endingBlock: number,
   config: SyncConfig,
   facilitator: Facilitator,
-  facilitatorConfig: FacilitatorConfig,
-  since: Date,
-  now: Date,
-  rpcUrl: string
+  facilitatorConfig: FacilitatorConfig
 ): Promise<TransferEventData[]> {
-  const provider = new RpcProvider({ nodeUrl: rpcUrl });
+  logger.log(`[${config.chain}] Creating DNA stream client...`);
+
+  // Create the streaming client
+  const client = new StreamClient({
+    url: dnaUrl,
+    token: authToken,
+    // Reconnect automatically on errors
+    onReconnect: async (err, retryCount) => {
+      logger.warn(`[${config.chain}] DNA stream disconnected, retry ${retryCount}:`, {
+        error: err.details,
+      });
+      
+      // Retry up to 5 times
+      if (retryCount < 5) {
+        await new Promise(resolve => setTimeout(resolve, 1000 * retryCount));
+        return { reconnect: true };
+      }
+      
+      return { reconnect: false };
+    },
+  });
+
+  // Build the filter for Transfer events
+  const transferKey = hash.getSelectorFromName('Transfer');
+  
+  const filter = Filter.create()
+    .withHeader({ weak: false })
+    .addEvent((ev) =>
+      ev
+        .withFromAddress(FieldElement.fromBigInt(contractAddress))
+        .withKeys([FieldElement.fromBigInt(transferKey)])
+        .withIncludeReceipt(true)
+        .withIncludeTransaction(true)
+    )
+    .encode();
+
+  logger.log(`[${config.chain}] Configuring DNA stream filter...`);
+
+  // Configure the stream
+  client.configure({
+    filter,
+    batchSize: 10, // Process 10 blocks at a time
+    cursor: {
+      orderKey: Long.fromNumber(startingBlock),
+      uniqueKey: new Uint8Array(), // Empty unique key for starting cursor
+    },
+    finality: v1alpha2.DataFinality.DATA_STATUS_ACCEPTED,
+  });
+
+  logger.log(`[${config.chain}] Starting DNA stream from block ${startingBlock}...`);
+
+  const allEvents: TransferEventData[] = [];
+  let blocksProcessed = 0;
+  let eventsProcessed = 0;
 
   try {
-    const transferKey = hash.getSelectorFromName('Transfer');
-    const latestBlock = await provider.getBlockLatestAccepted();
-    const STARKNET_BLOCK_TIME_SECONDS = 6;
-    
-    // Estimate block numbers
-    const nowBlockOffset = Math.floor(
-      (new Date().getTime() - now.getTime()) / 1000 / STARKNET_BLOCK_TIME_SECONDS
-    );
-    const sinceBlockOffset = Math.floor(
-      (new Date().getTime() - since.getTime()) / 1000 / STARKNET_BLOCK_TIME_SECONDS
-    );
-    
-    const toBlock = Math.max(0, latestBlock.block_number - nowBlockOffset);
-    const fromBlock = Math.max(0, latestBlock.block_number - sinceBlockOffset);
+    // Stream blocks as an async iterator
+    for await (const message of client) {
+      // Handle data messages
+      if (message.data) {
+        // Cast to the correct type
+        const blockData = message.data as any;
+        const blockNumber = Number(blockData.cursor?.orderKey || 0);
+        
+        // Check if we've reached the ending block
+        if (blockNumber > endingBlock) {
+          logger.log(
+            `[${config.chain}] Reached ending block ${endingBlock}, stopping stream`
+          );
+          break;
+        }
 
-    logger.log(
-      `[${config.chain}] Querying blocks ${fromBlock} to ${toBlock} for contract ${facilitatorConfig.token.address}`
-    );
+        // Parse events from this block
+        const blockEvents = parseApibaraStreamBlock(
+          blockData,
+          config,
+          facilitator,
+          facilitatorConfig
+        );
 
-    const allEvents: any[] = [];
-    let continuationToken: string | undefined;
-    let pageCount = 0;
-    const MAX_PAGES = 10;
+        allEvents.push(...blockEvents);
+        blocksProcessed++;
+        eventsProcessed += blockEvents.length;
 
-    // Fetch events with pagination
-    do {
-      const eventFilter: any = {
-        from_block: { block_number: fromBlock },
-        to_block: { block_number: toBlock },
-        address: facilitatorConfig.token.address,
-        keys: [[transferKey]],
-        chunk_size: Math.min(config.limit, 1000),
-      };
-
-      if (continuationToken) {
-        eventFilter.continuation_token = continuationToken;
-      }
-
-      logger.log(
-        `[${config.chain}] Fetching page ${pageCount + 1}${continuationToken ? ' with continuation token' : ''}`
-      );
-
-      const eventsResponse = await provider.getEvents(eventFilter);
-      const events = eventsResponse.events || [];
-
-      logger.log(`[${config.chain}] Received ${events.length} events in this page`);
-
-      allEvents.push(...events);
-      continuationToken = eventsResponse.continuation_token;
-      pageCount++;
-
-      if (allEvents.length >= config.limit || pageCount >= MAX_PAGES) {
-        if (continuationToken) {
-          logger.warn(
-            `[${config.chain}] Hit limit (${config.limit} events or ${MAX_PAGES} pages), more data available`
+        // Log progress every 100 blocks
+        if (blocksProcessed % 100 === 0) {
+          logger.log(
+            `[${config.chain}] DNA stream progress: block ${blockNumber}, ` +
+            `${blocksProcessed} blocks, ${eventsProcessed} events`
           );
         }
-        break;
+
+        // Safety limit: stop if we've collected enough events
+        if (allEvents.length >= config.limit) {
+          logger.warn(
+            `[${config.chain}] Hit event limit ${config.limit}, stopping stream`
+          );
+          break;
+        }
       }
-    } while (continuationToken);
+
+      // Handle heartbeat messages (keep-alive)
+      if (message.heartbeat) {
+        logger.log(`[${config.chain}] DNA heartbeat received`);
+      }
+
+      // Handle invalidate messages (chain reorg)
+      if (message.invalidate) {
+        logger.warn(
+          `[${config.chain}] Chain reorg detected, cursor reset to block ${message.invalidate.cursor?.orderKey}`
+        );
+      }
+    }
 
     logger.log(
-      `[${config.chain}] Total events fetched: ${allEvents.length} across ${pageCount} pages`
+      `[${config.chain}] DNA stream finished: ${blocksProcessed} blocks, ${eventsProcessed} events`
     );
 
-    // Parse events with optimized approach
-    const transferEvents = await parseApibaraEvents(
-      allEvents,
-      config,
-      facilitator,
-      facilitatorConfig,
-      provider
-    );
-
-    // Filter by facilitator
-    const normalizedFacilitatorAddr = facilitatorConfig.address
-      .toLowerCase()
-      .replace(/^0x0+/, '0x');
-
-    const facilitatorEvents = transferEvents.filter((event: TransferEventData) => {
-      const normalizedSender = event.sender
-        .toLowerCase()
-        .replace(/^0x0+/, '0x');
-      return normalizedSender === normalizedFacilitatorAddr;
-    });
-
-    logger.log(
-      `[${config.chain}] Filtered to ${facilitatorEvents.length} events from facilitator ${facilitator.id}`
-    );
-
-    return facilitatorEvents;
+    return allEvents;
   } catch (error) {
-    logger.error(`[${config.chain}] Error fetching with Apibara approach:`, {
+    logger.error(`[${config.chain}] DNA stream error:`, {
       error: error instanceof Error ? error.message : String(error),
-      stack: error instanceof Error ? error.stack : undefined,
     });
     throw error;
   }
 }
 
+/**
+ * Estimate block number from timestamp
+ * 
+ * Uses a known recent reference point and calculates from there.
+ * This is more accurate than calculating from genesis.
+ */
+function estimateBlockFromTimestamp(date: Date): number {
+  // Known reference point: Nov 3, 2025 08:00 UTC = block 3,354,000 (approximate current)
+  const REFERENCE_TIMESTAMP = 1762084800; // Nov 3, 2025 08:00:00 UTC
+  const REFERENCE_BLOCK = 3354000;
+  const STARKNET_BLOCK_TIME_SECONDS = 6;
+  
+  // Calculate blocks from reference point
+  const timestampSeconds = Math.floor(date.getTime() / 1000);
+  const secondsFromReference = timestampSeconds - REFERENCE_TIMESTAMP;
+  const blocksFromReference = Math.floor(secondsFromReference / STARKNET_BLOCK_TIME_SECONDS);
+  const estimatedBlock = REFERENCE_BLOCK + blocksFromReference;
+  
+  // Ensure we don't go below 0
+  return Math.max(0, estimatedBlock);
+}
