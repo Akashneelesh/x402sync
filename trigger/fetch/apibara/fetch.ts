@@ -79,6 +79,16 @@ export async function fetchApibara(
 
 /**
  * Fetch via Apibara DNA service
+ * 
+ * Important: Apibara DNA is designed for CONTINUOUS STREAMING, not batch queries.
+ * 
+ * How Apibara DNA works:
+ * 1. You start an indexer that streams blocks continuously
+ * 2. The indexer writes data to YOUR database
+ * 3. You query YOUR database for the data you need
+ * 
+ * For scheduled batch queries (like hourly syncs), RPC is actually more appropriate.
+ * Your Apibara token is valuable for setting up a real-time indexer.
  */
 async function fetchViaApibaraDna(
   config: SyncConfig,
@@ -89,18 +99,56 @@ async function fetchViaApibaraDna(
   dnaUrl: string,
   accessToken: string
 ): Promise<TransferEventData[]> {
-  // For now, Apibara DNA is primarily a streaming service
-  // For batch historical queries, we'll use RPC with Apibara-optimized settings
-  // In the future, this could use Apibara's query API if/when available
-  
-  logger.warn(
-    `[${config.chain}] Apibara DNA is primarily a streaming service. Using RPC with optimized settings.`
-  );
   logger.log(
-    `[${config.chain}] Tip: For real-time streaming, consider setting up an Apibara indexer.`
+    `[${config.chain}] Apibara DNA token detected: ${dnaUrl}`
   );
   
-  // Use RPC but with optimized settings
+  logger.info(
+    `[${config.chain}] 📘 About Apibara DNA:`
+  );
+  logger.info(
+    `[${config.chain}]    • Apibara DNA is a STREAMING service (real-time indexing)`
+  );
+  logger.info(
+    `[${config.chain}]    • It continuously streams new blocks as they arrive`
+  );
+  logger.info(
+    `[${config.chain}]    • Best for: Real-time data pipelines, live dashboards`
+  );
+  logger.info(
+    `[${config.chain}]    • Not ideal for: Scheduled batch queries (your use case)`
+  );
+  
+  logger.info(
+    `[${config.chain}] 💡 For batch historical queries, RPC is more efficient!`
+  );
+  logger.info(
+    `[${config.chain}]    • RPC: Query specific time ranges on demand`
+  );
+  logger.info(
+    `[${config.chain}]    • Apibara: Stream all blocks continuously`
+  );
+  
+  logger.info(
+    `[${config.chain}] 🚀 To use your Apibara token for real-time indexing:`
+  );
+  logger.info(
+    `[${config.chain}]    1. Set up an Apibara indexer (see docs)`
+  );
+  logger.info(
+    `[${config.chain}]    2. Stream Transfer events to your database`
+  );
+  logger.info(
+    `[${config.chain}]    3. Query your indexed database directly`
+  );
+  logger.info(
+    `[${config.chain}]    Docs: https://www.apibara.com/docs`
+  );
+  
+  logger.log(
+    `[${config.chain}] Using optimized RPC for batch queries (best for scheduled syncs)`
+  );
+
   const rpcUrl = process.env.STARKNET_RPC_URL || 
     'https://starknet-mainnet.g.alchemy.com/starknet/version/rpc/v0_9/iK7ogImR5B8hKI4X43AQh';
   
