@@ -29,6 +29,4 @@ export default defineConfig({
       }),
     ],
   },
-  // Ensure environment variables are available in the runtime
-  instrumentedPackageNames: ['@prisma/client', '@neondatabase/serverless'],
 });
