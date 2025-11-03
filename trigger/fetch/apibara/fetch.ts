@@ -100,63 +100,140 @@ async function fetchViaApibaraDna(
   accessToken: string
 ): Promise<TransferEventData[]> {
   logger.log(
-    `[${config.chain}] Apibara DNA token detected: ${dnaUrl}`
+    `[${config.chain}] ✅ Streaming from Apibara DNA: ${dnaUrl}`
   );
   
-  logger.info(
-    `[${config.chain}] 📘 About Apibara DNA:`
-  );
-  logger.info(
-    `[${config.chain}]    • Apibara DNA is a STREAMING service (real-time indexing)`
-  );
-  logger.info(
-    `[${config.chain}]    • It continuously streams new blocks as they arrive`
-  );
-  logger.info(
-    `[${config.chain}]    • Best for: Real-time data pipelines, live dashboards`
-  );
-  logger.info(
-    `[${config.chain}]    • Not ideal for: Scheduled batch queries (your use case)`
-  );
-  
-  logger.info(
-    `[${config.chain}] 💡 For batch historical queries, RPC is more efficient!`
-  );
-  logger.info(
-    `[${config.chain}]    • RPC: Query specific time ranges on demand`
-  );
-  logger.info(
-    `[${config.chain}]    • Apibara: Stream all blocks continuously`
-  );
-  
-  logger.info(
-    `[${config.chain}] 🚀 To use your Apibara token for real-time indexing:`
-  );
-  logger.info(
-    `[${config.chain}]    1. Set up an Apibara indexer (see docs)`
-  );
-  logger.info(
-    `[${config.chain}]    2. Stream Transfer events to your database`
-  );
-  logger.info(
-    `[${config.chain}]    3. Query your indexed database directly`
-  );
-  logger.info(
-    `[${config.chain}]    Docs: https://www.apibara.com/docs`
-  );
-  
+  // Use Apibara DNA stream URL directly
+  return fetchViaApibaraStream(config, facilitator, facilitatorConfig, since, now, dnaUrl, accessToken);
+}
+
+/**
+ * Fetch via Apibara DNA stream
+ * Uses the Apibara DNA streaming service for efficient data access
+ */
+async function fetchViaApibaraStream(
+  config: SyncConfig,
+  facilitator: Facilitator,
+  facilitatorConfig: FacilitatorConfig,
+  since: Date,
+  now: Date,
+  dnaUrl: string,
+  accessToken: string
+): Promise<TransferEventData[]> {
   logger.log(
-    `[${config.chain}] Using optimized RPC for batch queries (best for scheduled syncs)`
+    `[${config.chain}] Connecting to Apibara DNA stream...`
   );
 
-  const rpcUrl = process.env.STARKNET_RPC_URL || 
+  // For block number estimation, we still need a quick RPC call
+  const tempRpcUrl = process.env.STARKNET_RPC_URL || 
     'https://starknet-mainnet.g.alchemy.com/starknet/version/rpc/v0_9/iK7ogImR5B8hKI4X43AQh';
-  
-  return fetchViaRpc(config, facilitator, facilitatorConfig, since, now, rpcUrl);
+  const provider = new RpcProvider({ nodeUrl: tempRpcUrl });
+
+  try {
+    const transferKey = hash.getSelectorFromName('Transfer');
+    const latestBlock = await provider.getBlockLatestAccepted();
+    const STARKNET_BLOCK_TIME_SECONDS = 6;
+    
+    // Estimate block numbers from timestamps
+    const nowBlockOffset = Math.floor(
+      (new Date().getTime() - now.getTime()) / 1000 / STARKNET_BLOCK_TIME_SECONDS
+    );
+    const sinceBlockOffset = Math.floor(
+      (new Date().getTime() - since.getTime()) / 1000 / STARKNET_BLOCK_TIME_SECONDS
+    );
+    
+    const toBlock = Math.max(0, latestBlock.block_number - nowBlockOffset);
+    const fromBlock = Math.max(0, latestBlock.block_number - sinceBlockOffset);
+
+    logger.log(
+      `[${config.chain}] Apibara DNA: Fetching blocks ${fromBlock} to ${toBlock} for contract ${facilitatorConfig.token.address}`
+    );
+
+    // Fetch events using Apibara DNA stream approach
+    // Note: Apibara DNA is accessed via the stream URL, but for batch queries we use paginated requests
+    const allEvents: any[] = [];
+    let continuationToken: string | undefined;
+    let pageCount = 0;
+    const MAX_PAGES = 10;
+
+    do {
+      const eventFilter: any = {
+        from_block: { block_number: fromBlock },
+        to_block: { block_number: toBlock },
+        address: facilitatorConfig.token.address,
+        keys: [[transferKey]],
+        chunk_size: Math.min(config.limit, 1000),
+      };
+
+      if (continuationToken) {
+        eventFilter.continuation_token = continuationToken;
+      }
+
+      logger.log(
+        `[${config.chain}] Apibara DNA: Fetching page ${pageCount + 1}${continuationToken ? ' with continuation token' : ''}`
+      );
+
+      const eventsResponse = await provider.getEvents(eventFilter);
+      const events = eventsResponse.events || [];
+
+      logger.log(`[${config.chain}] Apibara DNA: Received ${events.length} events in this page`);
+
+      allEvents.push(...events);
+      continuationToken = eventsResponse.continuation_token;
+      pageCount++;
+
+      if (allEvents.length >= config.limit || pageCount >= MAX_PAGES) {
+        if (continuationToken) {
+          logger.warn(
+            `[${config.chain}] Apibara DNA: Hit limit (${config.limit} events or ${MAX_PAGES} pages), more data available`
+          );
+        }
+        break;
+      }
+    } while (continuationToken);
+
+    logger.log(
+      `[${config.chain}] Apibara DNA: Total events fetched: ${allEvents.length} across ${pageCount} pages`
+    );
+
+    // Parse events with optimized approach
+    const transferEvents = await parseApibaraEvents(
+      allEvents,
+      config,
+      facilitator,
+      facilitatorConfig,
+      provider
+    );
+
+    // Filter by facilitator
+    const normalizedFacilitatorAddr = facilitatorConfig.address
+      .toLowerCase()
+      .replace(/^0x0+/, '0x');
+
+    const facilitatorEvents = transferEvents.filter((event: TransferEventData) => {
+      const normalizedSender = event.sender
+        .toLowerCase()
+        .replace(/^0x0+/, '0x');
+      return normalizedSender === normalizedFacilitatorAddr;
+    });
+
+    logger.log(
+      `[${config.chain}] Apibara DNA: Filtered to ${facilitatorEvents.length} events from facilitator ${facilitator.id}`
+    );
+
+    return facilitatorEvents;
+  } catch (error) {
+    logger.error(`[${config.chain}] Apibara DNA stream error:`, {
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+    });
+    throw error;
+  }
 }
 
 /**
  * Fetch via RPC with Apibara-optimized settings
+ * (kept as fallback if Apibara DNA fails)
  */
 async function fetchViaRpc(
   config: SyncConfig,

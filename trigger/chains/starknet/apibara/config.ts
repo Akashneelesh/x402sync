@@ -13,10 +13,10 @@ export const starknetApibaraConfig: SyncConfig = {
   maxDurationInSeconds: ONE_MINUTE_IN_SECONDS * 15, // 15 minutes max
   chain: 'starknet',
   provider: QueryProvider.APIBARA,
-  apiUrl: process.env.APIBARA_RPC_URL || 'Optimized RPC approach',
+  apiUrl: process.env.APIBARA_DNA_URL || 'https://mainnet.starknet.a5a.ch', // Apibara DNA stream URL
   paginationStrategy: PaginationStrategy.TIME_WINDOW,
-  timeWindowInMs: ONE_DAY_IN_MS * 2, // 2-day windows (faster processing allows larger windows)
-  limit: 5_000, // 5,000 events per window (optimized approach handles more)
+  timeWindowInMs: ONE_DAY_IN_MS * 2, // 2-day windows
+  limit: 5_000, // 5,000 events per window
   facilitators: FACILITATORS_BY_CHAIN(Chain.STARKNET),
   buildQuery,
   transformResponse,
