@@ -1,67 +1,59 @@
-# Starknet Integration for x402sync
+# Starknet Integration for x402sync (Apibara Branch)
 
 This directory contains the Starknet blockchain integration for the x402sync data synchronization system.
 
 ## Overview
 
-The Starknet integration tracks USDC token transfers on the Starknet mainnet using **direct RPC queries** via Starknet.js.
+The Starknet integration tracks USDC token transfers on the Starknet mainnet using **optimized batch queries** via RPC (Starknet.js).
+
+**Note:** This is the `apibara` branch. For the standard RPC implementation, see the `rpc` branch.
 
 ## Implementation
 
-### 🚀 Starknet Apibara (Recommended - Low Latency)
-**Status:** Ready to use  
+### 🚀 Starknet Apibara Integration
+**Status:** Production-ready  
 **Location:** `trigger/chains/starknet/apibara/`
+**Branch:** `apibara`
 
-Uses Apibara's streaming data platform for low-latency, efficient data access. **Recommended for production due to better performance.**
+This implementation provides optimized batch data synchronization with support for Apibara DNA tokens.
+
+**How It Works:**
+- Detects `APIBARA_ACCESS_TOKEN` if available
+- Uses optimized RPC for batch historical queries
+- **Why RPC?** Apibara DNA is for real-time streaming, RPC is better for scheduled batch syncs
+- See [APIBARA_DNA_VS_RPC.md](../../../APIBARA_DNA_VS_RPC.md) for detailed explanation
 
 **Features:**
-- ✅ **Low latency** streaming data
-- ✅ **Efficient** - No need for batch RPC calls
-- ✅ Built-in block reorganization handling
-- ✅ Real-time data availability
-- ✅ Optimized for Starknet
+- ✅ **Optimized performance** - 10 concurrent requests, smart retries
+- ✅ **Efficient caching** - Batches blocks and transactions
+- ✅ **Apibara token support** - Ready for future real-time features
+- ✅ **Graceful fallback** - Works with or without Apibara token
+- ✅ **Rate limit handling** - Auto-retry with backoff
+- ✅ **Production-ready** - 2-day time windows, 5k event limit
 
 **Configuration:**
 - Cron: Runs every hour (`0 * * * *`)
-- Time Window: 1 day
+- Time Window: 2 days (configurable)
 - Limit: 5,000 events per window
-- API URL: Set via `APIBARA_DNA_URL` (defaults to mainnet.starknet.a5a.ch)
-- Optional API Key: Set via `APIBARA_API_KEY` for hosted service
-
-### ✅ Starknet RPC (Alternative)
-**Status:** Ready to use  
-**Location:** `trigger/chains/starknet/rpc/`
-
-Uses Starknet.js to query transfer events directly from Starknet RPC nodes with optimized batch processing.
-
-**Features:**
-- ✅ Efficient batch caching
-- ✅ Proper pagination handling
-- ✅ Rate limiting protection
-- ✅ Works with any RPC provider
-
-**Configuration:**
-- Cron: Runs every hour (`0 * * * *`)
-- Time Window: 1 day
-- Limit: 2,000 events per window
-- RPC URL: Set via `STARKNET_RPC_URL` environment variable
+- Concurrency: 10 parallel requests
+- Max Duration: 15 minutes
 
 **Environment Variables:**
 ```bash
-# For Apibara (recommended)
+# Apibara Token (optional - enables Apibara DNA features)
+APIBARA_ACCESS_TOKEN=apa_your_token_here          # Your Apibara access token
 APIBARA_DNA_URL=https://mainnet.starknet.a5a.ch  # Optional, has default
-APIBARA_API_KEY=your_key_here                    # Optional, for hosted service
 
-# For RPC (alternative)
-STARKNET_RPC_URL=https://starknet-mainnet.public.blastapi.io  # Optional, has default
+# Starknet RPC (required for batch queries)
+STARKNET_RPC_URL=https://starknet-mainnet.g.alchemy.com/starknet/version/rpc/v0_9/YOUR_KEY
 
-# Required
-DATABASE_URL=postgresql://...  # Required
+# Database (required)
+DATABASE_URL=postgresql://...
 ```
 
-### 🔮 Future Data Providers
-
-When BigQuery or Bitquery add Starknet support, you can add those implementations following the pattern from other chains (Solana, Base, Polygon).
+**See also:**
+- [ENVIRONMENT_SETUP.md](../../../ENVIRONMENT_SETUP.md) - Complete environment setup guide
+- [APIBARA_DNA_VS_RPC.md](../../../APIBARA_DNA_VS_RPC.md) - Why we use RPC for batch queries
 
 ## Token Configuration
 
