@@ -26,12 +26,14 @@ async function retryWithBackoff<T>(
         errorMsg.includes('Rate limit') || 
         errorMsg.includes('-32097') ||
         errorMsg.includes('429') ||
-        errorMsg.includes('compute units per second');
+        errorMsg.includes('compute units per second') ||
+        errorMsg.includes('Unexpected end of JSON input') || // Malformed response due to rate limiting
+        errorMsg.includes('JSON');
       
       if (isRateLimit && attempt < maxRetries - 1) {
-        // Exponential backoff for rate limits
+        // Exponential backoff for rate limits and JSON errors
         const delay = baseDelay * Math.pow(2, attempt);
-        logger.log(`Rate limit hit, retrying in ${delay}ms (attempt ${attempt + 1}/${maxRetries})`);
+        logger.log(`Rate limit/JSON error, retrying in ${delay}ms (attempt ${attempt + 1}/${maxRetries})`);
         await new Promise(resolve => setTimeout(resolve, delay));
       } else if (attempt === maxRetries - 1) {
         // Failed all retries
@@ -65,18 +67,18 @@ export async function parseStarknetEvents(
   const uniqueBlockNumbers = [...new Set(events.map(e => e.block_number))];
   logger.log(`[${config.chain}] Fetching ${uniqueBlockNumbers.length} unique blocks`);
 
-  // Step 2: Batch fetch block data (balanced for Alchemy free tier)
+  // Step 2: Batch fetch block data (very conservative for rate limits)
   const blockCache = new Map<number, any>();
-  const limit = pLimit(5); // Sweet spot for Alchemy free tier - not too fast, not too slow
+  const blockLimit = pLimit(2); // Reduced from 5 to 2 - more conservative
 
   // Process all blocks with controlled concurrency
   await Promise.all(
     uniqueBlockNumbers.map(blockNum =>
-      limit(async () => {
+      blockLimit(async () => {
         const block = await retryWithBackoff(
           () => provider.getBlockWithTxHashes(blockNum),
-          3, // More retries for 429 errors
-          1500 // Reasonable delay
+          5, // Increased retries from 3 to 5
+          2000 // Increased delay from 1500 to 2000ms
         );
         if (block) {
           blockCache.set(blockNum, block);
@@ -91,16 +93,17 @@ export async function parseStarknetEvents(
   const uniqueTxHashes = [...new Set(events.map(e => e.transaction_hash))];
   logger.log(`[${config.chain}] Fetching ${uniqueTxHashes.length} unique transactions`);
 
-  // Step 4: Batch fetch transaction data (balanced for Alchemy free tier)
+  // Step 4: Batch fetch transaction data (very conservative for rate limits)
   const txCache = new Map<string, any>();
+  const txLimit = pLimit(2); // Reduced from 5 to 2 - more conservative
 
   await Promise.all(
     uniqueTxHashes.map(txHash =>
-      limit(async () => {
+      txLimit(async () => {
         const tx = await retryWithBackoff(
           () => provider.getTransactionByHash(txHash),
-          3, // More retries for 429 errors
-          1500 // Reasonable delay
+          5, // Increased retries from 3 to 5
+          2000 // Increased delay from 1500 to 2000ms
         );
         if (tx) {
           txCache.set(txHash, tx);
