@@ -93,17 +93,3 @@ npm run trigger:deploy           # Deploy to Trigger.dev
 npm run db:migrate:prod          # Run production migrations
 ```
 
-## Technology Stack
-
-- **Runtime**: Node.js + TypeScript
-- **Database**: PostgreSQL + Prisma ORM
-- **Task Scheduler**: Trigger.dev
-- **Blockchain APIs**:
-  - Apibara DNA (Starknet real-time streaming)
-  - Coinbase CDP SDK (Base)
-  - BigQuery (Polygon, Solana)
-  - Bitquery (Polygon, Solana)
-
-## License
-
-ISC
