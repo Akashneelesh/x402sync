@@ -50,11 +50,6 @@ npm run db:push
 npm run trigger:dev
 ```
 
-## Documentation
-
-- **[Apibara DNA Streaming Guide](./APIBARA_DNA_STREAMING_GUIDE.md)** - Complete guide for real-time Starknet streaming
-- **[Starknet README](./trigger/chains/starknet/README.md)** - Starknet-specific configuration
-- **[Performance Analysis](./STARKNET_PERFORMANCE.md)** - Performance benchmarks and optimization
 
 ## Project Structure
 
